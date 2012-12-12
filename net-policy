@@ -1,0 +1,131 @@
+#!/usr/bin/env python
+
+import os
+import sys
+import ldap
+
+# sys.argv = [
+#  [0] : '/etc/openvpn/net-policy/net-policy',
+#  [1] : '/tmp/openvpn_cc_b0a78a9c69679c3c430d874c2e034293.tmp'
+# ]
+# os.environ = {
+#   'untrusted_ip': '172.31.170.1',         # client's real address
+#   'untrusted_port': '43023',
+#   'trusted_ip': '172.31.170.1',
+#   'trusted_port': '43023',
+#   'ifconfig_pool_remote_ip': '10.1.1.2',  # client's VPN address
+#   'ifconfig_pool_netmask': '255.255.255.0',
+#   'ifconfig_broadcast': '10.1.1.255',
+#   'ifconfig_netmask': '255.255.255.0',
+#   'ifconfig_local': '10.1.1.1',
+#   'proto_1': 'udp',
+#   'remote_port_1': '1194',
+#   'local_port_1': '1194',
+#   'dev': 'tun0',
+#   'tun_mtu': '1500',
+#   'link_mtu': '1541',
+#   'common_name': 'test.user',             # client's cert name
+#   'daemon_start_time': '1354594330',
+#   'time_unix': '1354594343',
+#   'time_ascii': 'Tue Dec  4 17:12:23 2012',
+#   'script_context': 'init',
+#   'script_type': 'client-connect',
+#   'username': 'test.user',                # client's user name
+#   'auth_control_file': '/tmp/openvpn_acf_39cebc0d6f0d3fe04bdc3ddc18d45aef.tmp',
+# }
+
+config_file = "net-policy.conf"
+
+# Workflow:
+# - set username = os.environ['common_name']
+# - look up group.netobject for username
+# - for each netobject:
+#   - iptables -A $CHAIN -s $ifconfig_pool_remote_ip -d $netobject.dstnet/$netobject.dstmask -j ACCEPT
+#   - emit 'push "route $netobject.dstnet $netobject.dstmask"' to sys.argv[1]
+# - exit
+
+def debug(message):
+    print("# DEBUG: %s" % message)
+
+def fatal(message, exitcode = 1):
+    sys.stderr.write("FATAL: %s\n" % message)
+    sys.exit(exitcode)
+
+class conf(object):
+    uri = ""
+    bind_dn = ""
+    bind_pw = ""
+    base_dn = ""
+    start_tls = False
+    tls_cacertfile = ""
+    tls_cacertpath = ""
+    search_filter = ""
+    search_base   = ""
+
+class NetPolicy(object):
+    def __init__(self, conf):
+        self.conf = conf
+
+        # Connect to the LDAP server
+        try:
+            self.con = ldap.initialize(conf.uri)
+            if conf.start_tls:
+                if conf.tls_cacertpath:
+                    self.con.set_option(ldap.OPT_X_TLS_CACERTPATH, conf.tls_cacertpath)
+                if conf.tls_cacertfile:
+                    self.con.set_option(ldap.OPT_X_TLS_CACERTFILE, conf.tls_cacertfile)
+                self.con.set_option(ldap.OPT_X_TLS, ldap.OPT_X_TLS_DEMAND)
+                self.con.start_tls_s()
+                debug("STARTTLS succeeded. The connection is now secured.")
+            self.con.bind_s(conf.bind_dn, conf.bind_pw, ldap.AUTH_SIMPLE)
+        except ldap.INVALID_CREDENTIALS:
+            fatal("Invalid credentials. Check bind_dn [%s] and bind_pw [%s] values." % (conf.bind_dn, conf.bind_pw))
+        except ldap.SERVER_DOWN:
+            fatal("Connection error. Check conf.uri value.")
+        except ldap.LDAPError, e:
+            fatal("%s %s" % (e.args[0]["desc"], "info" in e.args[0] and "- " + e.args[0]['info'] or ""))
+
+    def fetch_net_allow(self):
+        net_allow = []
+        filterstr = "(&(objectClass=netRuleSet)(%s))" % (self.conf.search_filter % os.environ)
+        attrlist = [ 'netAllow' ]
+        debug("LDAP search: base=%r, filter=%r, attrs=%r" % (self.conf.search_base, filterstr, attrlist))
+        res = self.con.search_s(self.conf.search_base, ldap.SCOPE_SUBTREE, filterstr, attrlist)
+        debug("LDAP result: %r" % res)
+        for record in res:
+            if 'netAllow' in record[1]:
+                for rule in record[1]['netAllow']:
+                    if rule not in net_allow:
+                        net_allow.append(rule)
+        debug("NetAllow rules: %r" % (net_allow))
+        return net_allow
+
+    def emit_openvpn(self, outfile):
+        net_allow = self.fetch_net_allow()
+        for rule in net_allow:
+            outfile.write('push "route %s"\n' % rule)
+
+    def emit_iptables(self):
+        pass
+
+if __name__ == "__main__":
+    # Temporary config-like handling.
+    # We'll do better later.
+    try:
+        execfile(config_file)
+    except:
+        fatal("Failure reading config file: %s" % config_file)
+
+    try:
+        outfile = open(sys.argv[1], "w")
+    except IndexError, e:
+        outfile = sys.stdout
+    except:
+        fatal("Unable to open output file")
+
+    np = NetPolicy(conf)
+    np.emit_openvpn(outfile)
+    np.emit_iptables()
+
+    outfile.close()
+

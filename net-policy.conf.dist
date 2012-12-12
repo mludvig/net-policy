@@ -1,0 +1,5 @@
+conf.uri = "ldapi://"
+conf.bind_dn = "cn=Manager,dc=example,dc=com"
+conf.bind_pw = "Pa55w0rd"
+conf.search_filter = "memberUid=%(username)s"
+conf.search_base = "ou=Group,dc=example,dc=com"
