@@ -61,6 +61,10 @@ class conf(object):
     tls_cacertpath = ""
     search_filter = ""
     search_base   = ""
+    netfilter_iptables = "iptables"
+    netfilter_table = "NET-POLICY"
+    netfilter_allow = "ACCEPT"
+    netfilter_deny = "REJECT"
 
 class NetPolicy(object):
     def __init__(self, conf):
@@ -86,19 +90,25 @@ class NetPolicy(object):
             fatal("%s %s" % (e.args[0]["desc"], "info" in e.args[0] and "- " + e.args[0]['info'] or ""))
 
     def fetch_net_allow(self):
-        net_allow = []
+        return self.fetch_net_list('netAllow')
+
+    def fetch_net_deny(self):
+        return self.fetch_net_list('netDeny')
+
+    def fetch_net_list(self, list_attr):
+        net_list = []
         filterstr = "(&(objectClass=netRuleSet)(%s))" % (self.conf.search_filter % os.environ)
-        attrlist = [ 'netAllow' ]
+        attrlist = [ list_attr ]
         debug("LDAP search: base=%r, filter=%r, attrs=%r" % (self.conf.search_base, filterstr, attrlist))
         res = self.con.search_s(self.conf.search_base, ldap.SCOPE_SUBTREE, filterstr, attrlist)
         debug("LDAP result: %r" % res)
         for record in res:
-            if 'netAllow' in record[1]:
-                for rule in record[1]['netAllow']:
-                    if rule not in net_allow:
-                        net_allow.append(rule)
-        debug("NetAllow rules: %r" % (net_allow))
-        return net_allow
+            if list_attr in record[1]:
+                for rule in record[1][list_attr]:
+                    if rule not in net_list:
+                        net_list.append(rule)
+        debug("%s rules: %r" % (list_attr, net_list))
+        return net_list
 
     def emit_openvpn(self, outfile):
         net_allow = self.fetch_net_allow()
@@ -106,7 +116,27 @@ class NetPolicy(object):
             outfile.write('push "route %s"\n' % rule)
 
     def emit_iptables(self):
-        pass
+        net_deny = self.fetch_net_deny()
+        for rule in net_deny:
+            command = "%s -I %s -s %s -d %s -j %s" % (
+                self.conf.netfilter_iptables,
+                self.conf.netfilter_table,
+                os.environ['ifconfig_pool_remote_ip'],
+                rule,
+                self.conf.netfilter_deny)
+            debug("command: %s" % command)
+            os.system(command)
+
+        net_allow = self.fetch_net_allow()
+        for rule in net_allow:
+            command = "%s -I %s -s %s -d %s -j %s" % (
+                self.conf.netfilter_iptables,
+                self.conf.netfilter_table,
+                os.environ['ifconfig_pool_remote_ip'],
+                rule,
+                self.conf.netfilter_allow)
+            debug("command: %s" % command)
+            os.system(command)
 
 if __name__ == "__main__":
     # Temporary config-like handling.
