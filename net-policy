@@ -2,6 +2,7 @@
 
 import os
 import sys
+import struct
 import syslog
 import ldap
 
@@ -54,6 +55,12 @@ def fatal(message, exitcode = 1):
     syslog.syslog("FATAL: %s" % message)
     sys.stderr.write("FATAL: %s\n" % message)
     sys.exit(exitcode)
+
+def prefix_to_netmask_v4(prefix):
+    # Functional prefix-length -> netmask convertor
+    # E.g. 20 -> 255.255.240.0
+    netmask_int = lambda x: (1L<<x)-1 << (32 - x)
+    return ".".join(map(str, struct.unpack("4B", struct.pack('>I', netmask_int(int(prefix))))))
 
 class conf(object):
     uri = ""
@@ -117,7 +124,12 @@ class NetPolicy(object):
     def emit_openvpn(self, outfile):
         net_allow = self.fetch_net_allow()
         for rule in net_allow:
-            outfile.write('push "route %s"\n' % rule)
+            ip, netmask = rule.split("/")
+            if int(netmask) >= 0 and int(netmask) <= 32:
+                netmask = prefix_to_netmask_v4(netmask)
+            push_rule = 'push "route %s %s"\n' % (ip, netmask)
+            debug(push_rule)
+            outfile.write(push_rule)
 
     def emit_iptables(self):
         net_deny = self.fetch_net_deny()
