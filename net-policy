@@ -36,7 +36,7 @@ import ldap
 #   'auth_control_file': '/tmp/openvpn_acf_39cebc0d6f0d3fe04bdc3ddc18d45aef.tmp',
 # }
 
-config_file = "net-policy.conf"
+config_file = "/etc/openvpn/net-policy/net-policy.conf"
 
 # Workflow:
 # - set username = os.environ['common_name']
