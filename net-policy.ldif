@@ -1,0 +1,33 @@
+#
+# >> automatically generated from: netruleset.schema <<
+#
+
+dn: cn=netruleset,cn=schema,cn=config
+objectClass: olcSchemaConfig
+cn: netruleset
+#
+# NetRuleSet LDAP schema
+#
+# Author: Michal Ludvig <michal@logix.cz>
+#
+# Common Logix OID structure
+# <LogixOID>.<Project>.<SNMP/LDAP>.<...>
+olcObjectIdentifier: {0}logixOID         1.3.6.1.4.1.40789
+olcObjectIdentifier: {1}lxNetPolicyPrj   logixOID:2013.06.1
+olcObjectIdentifier: {2}lxNpolSNMP       lxNetPolicyPrj:1
+olcObjectIdentifier: {3}lxNpolLDAP       lxNetPolicyPrj:2
+# NetRuleSet schema sub-tree
+olcObjectIdentifier: {4}lxNpolAttribute   lxNrsLDAP:1
+olcObjectIdentifier: {5}lxNpolObjectClass lxNrsLDAP:2
+olcAttributeTypes: {0}( lxNpolAttribute:1
+  NAME 'policyIpsetName'
+  DESC 'IPset table name'
+  EQUALITY caseExactMatch
+  SUBSTR caseExactSubstringsMatch
+  SYNTAX 1.3.6.1.4.1.1466.115.121.1.44{128} )
+olcObjectClasses: {0}( lxNpolObjectClass:1
+  NAME 'netRuleSet'
+  DESC 'Network access rule set'
+  SUP top
+  AUXILIARY
+  MAY ( ipsetName ) )
