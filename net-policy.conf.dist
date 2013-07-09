@@ -1,10 +1,5 @@
-conf.uri = "ldapi://"
+conf.uri = "ldap://ldap.example.com"
 conf.bind_dn = "cn=Manager,dc=example,dc=com"
 conf.bind_pw = "Pa55w0rd"
-conf.search_filter = "memberUid=%(username)s"
+conf.search_attr = "cn"
 conf.search_base = "ou=Group,dc=example,dc=com"
-
-conf.netfilter_iptables = "/sbin/iptables" # Command to run for iptables
-conf.netfilter_table = "NET-POLICY" # Created with iptables -N <TABLES>
-conf.netfilter_allow = "ACCEPT"     # Sensible values: ACCEPT, RETURN
-conf.netfilter_deny = "REJECT"      # Sensible values: REJECT, DROP
