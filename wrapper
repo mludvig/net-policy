@@ -1,0 +1,16 @@
+#!/bin/bash
+
+## wrapper - log stdout and stderr to syslog
+## E.g. for net-policy development to log Python errors to syslog
+## By Michal Ludvig <michal.ludvig@enterpriseit.co.nz>
+
+## Usage - in openvpn.conf:
+## script-security 2
+## client-connect "/etc/openvpn/net-policy/wrapper /etc/openvpn/net-policy/net-policy"
+## client-disconnect "/etc/openvpn/net-policy/wrapper /etc/openvpn/net-policy/net-policy"
+
+CMD=$1
+shift
+/usr/bin/logger -t "$CMD" -p local0.error "Running: $CMD $*"
+$CMD $* 2>&1 | /usr/bin/logger -t "$CMD" -p local0.error
+exit ${PIPESTATUS[0]}
