@@ -4,7 +4,7 @@ import os
 import sys
 import struct
 import syslog
-import ldap
+import pwd, grp
 
 # sys.argv = [
 #  [0] : '/etc/openvpn/net-policy/net-policy',
@@ -40,9 +40,9 @@ config_file = "/etc/openvpn/net-policy/net-policy.conf"
 
 # Workflow:
 # - set username = os.environ['common_name']
-# - look up group.netobject for username
-# - for each netobject:
-#   - iptables -A $CHAIN -s $ifconfig_pool_remote_ip -d $netobject.dstnet/$netobject.dstmask -j ACCEPT
+# - look up all groups for username
+# - for each group:
+#   - get list of networks from net-policy.rules
 #   - emit 'push "route $netobject.dstnet $netobject.dstmask"' to sys.argv[1]
 # - exit
 
@@ -63,56 +63,20 @@ def prefix_to_netmask_v4(prefix):
     return ".".join(map(str, struct.unpack("4B", struct.pack('>I', netmask_int(int(prefix))))))
 
 class conf(object):
-    uri            = ""
-    bind_dn        = ""
-    bind_pw        = ""
-    base_dn        = ""
-    start_tls      = False
-    tls_cacertfile = ""
-    tls_cacertpath = ""
-    search_attr    = "cn"
-    search_base    = ""
+    pass
 
 class NetPolicy(object):
     def __init__(self, conf):
         self.conf = conf
 
-        # Connect to the LDAP server
-        try:
-            self.con = ldap.initialize(conf.uri)
-            if conf.start_tls:
-                if conf.tls_cacertpath:
-                    self.con.set_option(ldap.OPT_X_TLS_CACERTPATH, conf.tls_cacertpath)
-                if conf.tls_cacertfile:
-                    self.con.set_option(ldap.OPT_X_TLS_CACERTFILE, conf.tls_cacertfile)
-                self.con.set_option(ldap.OPT_X_TLS, ldap.OPT_X_TLS_DEMAND)
-                self.con.start_tls_s()
-                debug("STARTTLS succeeded. The connection is now secured.")
-            self.con.bind_s(conf.bind_dn, conf.bind_pw, ldap.AUTH_SIMPLE)
-        except ldap.INVALID_CREDENTIALS:
-            fatal("Invalid credentials. Check bind_dn [%s] and bind_pw [%s] values." % (conf.bind_dn, conf.bind_pw))
-        except ldap.SERVER_DOWN:
-            fatal("Connection error. Check conf.uri value.")
-        except ldap.LDAPError, e:
-            fatal("%s %s" % (e.args[0]["desc"], "info" in e.args[0] and "- " + e.args[0]['info'] or ""))
-
-    def fetch_group_list(self):
-        group_list = []
-        filterstr = "(&(objectClass=posixGroup)(memberUid=%s))" % (os.environ['username'])
-        attrlist = [ self.conf.search_attr ]
-        debug("LDAP search: base=%r, filter=%r, attrs=%r" % (self.conf.search_base, filterstr, attrlist))
-        res = self.con.search_s(self.conf.search_base, ldap.SCOPE_SUBTREE, filterstr, attrlist)
-        for record in res:
-            if self.conf.search_attr in record[1]:
-                r_group = record[1][self.conf.search_attr]
-                if type(r_group) == list:
-                    group_list.extend(r_group)
-                else:
-                    group_list.append(r_group)
-        return group_list
+    def fetch_group_list(self, user):
+        group_list = [g.gr_gid for g in grp.getgrall() if user in g.gr_mem]
+        gid = pwd.getpwnam(user).pw_gid
+        group_list.insert(0, grp.getgrgid(gid).gr_gid)
+        return [grp.getgrgid(gid).gr_name for gid in gids]
 
     def emit_openvpn(self, outfile):
-        group_list = self.fetch_group_list()
+        group_list = self.fetch_group_list(os.environ['username'])
         debug("%s groups: %r" % (os.environ['username'], group_list))
         # TODO ...
 
