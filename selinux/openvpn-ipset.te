@@ -1,0 +1,20 @@
+# Allow openvpn scripts call /usr/sbin/ipset
+
+policy_module(openvpn-ipset, 1.0)
+
+require {
+	type openvpn_t;
+}
+
+# Define new domain type
+type ipset_t;
+type ipset_exec_t;
+application_domain(ipset_t, ipset_exec_t);
+role system_r types ipset_t;
+
+# Define type transition from snmpd_t through ipset_exec_t to ipset_t
+domain_auto_trans(openvpn_t, ipset_exec_t, ipset_t);
+
+# Make ipset_t permissive domain
+permissive ipset_t;
+

@@ -1,4 +1,7 @@
 net-policy.conf
+selinux/openvpn-ipset.if
+selinux/openvpn-ipset.pp
+selinux/tmp
 
 *.py[cod]
 
