@@ -4,7 +4,9 @@ import os
 import sys
 import struct
 import syslog
+import socket
 import pwd, grp
+from subprocess import Popen, PIPE
 
 # sys.argv = [
 #  [0] : '/etc/openvpn/net-policy/net-policy',
@@ -62,23 +64,83 @@ def prefix_to_netmask_v4(prefix):
     netmask_int = lambda x: (1L<<x)-1 << (32 - x)
     return ".".join(map(str, struct.unpack("4B", struct.pack('>I', netmask_int(int(prefix))))))
 
+def read_ipset(set_name):
+    addr_list = []
+    p = Popen(["/usr/sbin/ipset", "-q", "list", set_name],
+        shell=False, stdout=PIPE, stderr=PIPE, close_fds=True)
+    for line in p.stderr:
+        debug("ipset(err): " + line)
+    for line in p.stdout:
+        line = line.strip()
+        # There are no spaces on the address lines
+        if line.find(" ") >= 0:
+            continue
+        try:
+            ipaddr, prefix = line.split("/")
+        except:
+            ipaddr = line
+            prefix = None
+
+        # See if it is IPv4 address...
+        try:
+            socket.inet_pton(socket.AF_INET, ipaddr)
+            if not prefix:
+                prefix = 32
+            addr_list.append("%s %s" % (ipaddr, prefix_to_netmask_v4(prefix)))
+            continue
+        except socket.error:
+            pass
+
+        # See if it is IPv6 address...
+        try:
+            socket.inet_pton(socket.AF_INET6, ipaddr)
+            if not prefix:
+                prefix = 128
+            addr_list.append("%s/%s" % (ipaddr, prefix))
+            continue
+        except socket.error:
+            pass
+
+    return addr_list
 class conf(object):
-    pass
+    ipset_template = "pol-%(group)s-%(srcdst)s-v%(family)s"
 
 class NetPolicy(object):
-    def __init__(self, conf):
+    def __init__(self, conf, username, remote_ipv4, remote_ipv6):
         self.conf = conf
+        self.username = username
+        self.remote_ipv4 = remote_ipv4
+        self.remote_ipv6 = remote_ipv6
+        self.group_list = self.fetch_group_list(self.username)
 
-    def fetch_group_list(self, user):
-        group_list = [g.gr_gid for g in grp.getgrall() if user in g.gr_mem]
-        gid = pwd.getpwnam(user).pw_gid
+    def fetch_group_list(self, username):
+        group_list = [g.gr_gid for g in grp.getgrall() if username in g.gr_mem]
+        gid = pwd.getpwnam(username).pw_gid
         group_list.insert(0, grp.getgrgid(gid).gr_gid)
-        return [grp.getgrgid(gid).gr_name for gid in gids]
+        return [grp.getgrgid(gid).gr_name for gid in group_list]
+
+    def fetch_dst_addrs(self, group, family):
+        set_name = self.conf.ipset_template % { 'group' : group, 'srcdst' : 'dst', 'family' : family }
+        dst_addrs = read_ipset(set_name)
+        debug("Addrs(%s, IPv%d): %s" % (group, family, dst_addrs))
+        return dst_addrs
 
     def emit_openvpn(self, outfile):
+        def _pushroute(family):
+            addr_list = []
+            for group in group_list:
+                addr_list.extend(self.fetch_dst_addrs(group, family))
+            for addr in addr_list:
+                outfile.write('push "route %s"\n' % addr)
+
         group_list = self.fetch_group_list(os.environ['username'])
         debug("%s groups: %r" % (os.environ['username'], group_list))
-        # TODO ...
+        _pushroute(family = 4)
+        _pushroute(family = 6)
+
+    def emit_ipset(self):
+        # Insert remote IP to src ipset
+        pass
 
 if __name__ == "__main__":
     try:
@@ -105,7 +167,9 @@ if __name__ == "__main__":
     except:
         fatal("Unable to open output file")
 
-    np = NetPolicy(conf)
+    np = NetPolicy(conf, username = os.environ['username'],
+                remote_ipv4 = os.environ['ifconfig_pool_remote_ip'],
+                remote_ipv6 = os.environ.get('ifconfig_ipv6_remote', None))
     np.emit_openvpn(outfile)
 
     outfile.close()
